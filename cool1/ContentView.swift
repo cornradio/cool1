@@ -153,21 +153,27 @@ struct ContentView: View {
     
     private func loadInstalledApps() {
         let fileManager = FileManager.default
-        let appsDirectory = "/Applications"
+        let appDirectories = ["/Applications", "/System/Applications", "/Library/Application Support"]
+        var allApps: [AppInfo] = []
 
-        do {
-            let appUrls = try fileManager.contentsOfDirectory(atPath: appsDirectory)
-            apps = appUrls.compactMap { appName in
-                let appPath = "\(appsDirectory)/\(appName)"
-                if appName.hasSuffix(".app") {
-                    let name = (appName as NSString).deletingPathExtension
-                    return AppInfo(name: name, path: appPath)
+        for directory in appDirectories {
+            do {
+                let appUrls = try fileManager.contentsOfDirectory(atPath: directory)
+                let appsInDirectory = appUrls.compactMap { appName in
+                    let appPath = "\(directory)/\(appName)"
+                    if appName.hasSuffix(".app") {
+                        let name = (appName as NSString).deletingPathExtension
+                        return AppInfo(name: name, path: appPath)
+                    }
+                    return nil
                 }
-                return nil
-            }.sorted { $0.name < $1.name }
-        } catch {
-            print("Failed to load apps: \(error)")
+                allApps.append(contentsOf: appsInDirectory)
+            } catch {
+                print("Failed to load apps from \(directory): \(error)")
+            }
         }
+
+        apps = allApps.sorted { $0.name < $1.name }
     }
     
     private func launchSelectedApp() {
