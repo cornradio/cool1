@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Darwin
 
 struct AppInfo: Identifiable, Codable, Equatable, Hashable {
     let id = UUID()
@@ -13,7 +14,9 @@ struct HistoryItemView: View {
     let onLaunch: () -> Void
     let onToggleFavorite: () -> Void
     let onDelete: () -> Void
+    let onKill: () -> Void
     let onMove: (UUID, UUID) -> Void
+    let isOptionPressed: Bool
     @State private var isRunning: Bool = false
     @State private var appIcon: NSImage?
     
@@ -37,13 +40,22 @@ struct HistoryItemView: View {
             Text(app.name)
             Spacer()
             
+            // 只有在按住 Option 键时才显示 kill 和 delete 按钮
+            if isOptionPressed {
+                if isRunning {
+                    Button(action: onKill) {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                }
+                
+                Button(action: onDelete) {
+                    Image(systemName: "trash.fill")
+                }
+            }
+            
             Button(action: onToggleFavorite) {
                 Image(systemName: app.isFavorite ? "star.fill" : "star")
                     .foregroundColor(app.isFavorite ? .yellow : .gray)
-            }
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash.fill")
             }
         }
         .draggable(app.id.uuidString) { Text(app.name) }
@@ -91,6 +103,7 @@ struct ContentView: View {
     @State private var apps: [AppInfo] = []
     @State private var selectedApp: AppInfo?
     @State private var history: [AppInfo] = []
+    @State private var isOptionPressed: Bool = false
     
     private let historyKey = "AppLaunchHistory"
     
@@ -98,6 +111,10 @@ struct ContentView: View {
         HStack {
             VStack {
                 HStack{
+                    Button(action: selectAppManually) {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                    .help("手动选择一个 .app 文件")
                     Picker("选择应用", selection: $selectedApp) {
                         ForEach(apps) { app in
                             Text(app.name).tag(app as AppInfo?)
@@ -128,6 +145,7 @@ struct ContentView: View {
                             onLaunch: { launchAppFromHistory(app: app) },
                             onToggleFavorite: { toggleFavorite(app: app) },
                             onDelete: { deleteAppFromHistory(app: app) },
+                            onKill: { killApp(app: app) },
                             onMove: { fromId, toId in
                                 if let fromIndex = history.firstIndex(where: { $0.id == fromId }),
                                    let toIndex = history.firstIndex(where: { $0.id == toId }) {
@@ -135,7 +153,8 @@ struct ContentView: View {
                                     history.insert(item, at: toIndex)
                                     saveHistory()
                                 }
-                            }
+                            },
+                            isOptionPressed: isOptionPressed
                         )
                     }
                 }
@@ -144,16 +163,20 @@ struct ContentView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 500)
+        .frame(width: 500, height: 700)
         .onAppear {
             loadInstalledApps()
             loadHistory()
+            setupOptionKeyMonitor()
+        }
+        .onDisappear {
+            removeOptionKeyMonitor()
         }
     }
     
     private func loadInstalledApps() {
         let fileManager = FileManager.default
-        let appDirectories = ["/Applications", "/System/Applications", "/Library/Application Support"]
+        let appDirectories = ["/Applications", "/Applications/Utilities", "/Sytem/Applications", "/Library/Application Support"]
         var allApps: [AppInfo] = []
 
         for directory in appDirectories {
@@ -174,6 +197,28 @@ struct ContentView: View {
         }
 
         apps = allApps.sorted { $0.name < $1.name }
+    }
+    
+    private func selectAppManually() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedFileTypes = ["app"]
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            let name = url.deletingPathExtension().lastPathComponent
+            let path = url.path
+            let appInfo = AppInfo(name: name, path: path)
+            
+            if !apps.contains(where: { $0.path == path }) {
+                apps.append(appInfo)
+                apps.sort { $0.name < $1.name }
+            }
+            
+            // 确保选择器有对应项
+            selectedApp = apps.first(where: { $0.path == path }) ?? appInfo
+        }
     }
     
     private func launchSelectedApp() {
@@ -215,6 +260,44 @@ struct ContentView: View {
         saveHistory()
     }
     
+    private func killApp(app: AppInfo) {
+        let bundleURL = URL(fileURLWithPath: app.path)
+        guard let bundle = Bundle(url: bundleURL),
+              let bundleIdentifier = bundle.bundleIdentifier else {
+            return
+        }
+        
+        let runningApps = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleIdentifier == bundleIdentifier
+        }
+        
+        guard !runningApps.isEmpty else {
+            return
+        }
+        
+        for runningApp in runningApps {
+            let processIdentifier = runningApp.processIdentifier
+            
+            // 方法1: 先尝试正常终止
+            runningApp.terminate()
+            
+            // 方法2: 如果正常终止失败，等待后强制终止
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if !runningApp.isTerminated {
+                    // 使用 forceTerminate
+                    runningApp.forceTerminate()
+                    
+                    // 如果 forceTerminate 也失败，使用 kill 系统调用
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        if !runningApp.isTerminated {
+                            kill(processIdentifier, SIGKILL)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     private func saveHistory() {
         if let encoded = try? JSONEncoder().encode(history) {
             UserDefaults.standard.set(encoded, forKey: historyKey)
@@ -231,5 +314,45 @@ struct ContentView: View {
     // Function to get the app icon from its path
     private func getAppIcon(for appPath: String) -> NSImage {
         return NSWorkspace.shared.icon(forFile: appPath)
+    }
+    
+    private func setupOptionKeyMonitor() {
+        // 使用 NSEvent 监听修饰键变化
+        NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
+            let optionKeyPressed = event.modifierFlags.contains(.option)
+            DispatchQueue.main.async {
+                self.isOptionPressed = optionKeyPressed
+            }
+            return event
+        }
+        
+        // 也监听普通按键事件来更新状态
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+            let optionKeyPressed = event.modifierFlags.contains(.option)
+            DispatchQueue.main.async {
+                self.isOptionPressed = optionKeyPressed
+            }
+            return event
+        }
+        
+        // 初始检查 Option 键状态
+        checkOptionKeyState()
+        
+        // 定期检查 Option 键状态（作为备用方案）
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            self.checkOptionKeyState()
+        }
+    }
+    
+    private func checkOptionKeyState() {
+        let currentFlags = NSEvent.modifierFlags
+        let optionPressed = currentFlags.contains(.option)
+        if isOptionPressed != optionPressed {
+            isOptionPressed = optionPressed
+        }
+    }
+    
+    private func removeOptionKeyMonitor() {
+        // 清理监控器（如果需要）
     }
 }
