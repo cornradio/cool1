@@ -112,12 +112,15 @@ struct ContentView: View {
     @State private var selectedApp: AppInfo?
     @State private var history: [AppInfo] = []
     @State private var isOptionPressed: Bool = false
+<<<<<<< HEAD
     @State private var isCommandPressed: Bool = false
     @State private var forceShowOptions: Bool = false
     @State private var runningApps: [AppInfo] = []
     @State private var showRunningSheet: Bool = false
     @State private var historySortMode: HistorySortMode = .manual
     @State private var showOnlyFavorites: Bool = false
+=======
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
     
     private let historyKey = "AppLaunchHistory"
     
@@ -129,6 +132,7 @@ struct ContentView: View {
                         Image(systemName: "folder.badge.plus")
                     }
                     .help("手动选择一个 .app 文件")
+<<<<<<< HEAD
                     Button(action: {
                         loadRunningApps()
                         showRunningSheet = true
@@ -136,6 +140,8 @@ struct ContentView: View {
                         Image(systemName: "list.bullet.rectangle")
                     }
                     .help("查看并选择正在运行的程序")
+=======
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
                     Picker("选择应用", selection: $selectedApp) {
                         ForEach(apps) { app in
                             Text(app.name).tag(app as AppInfo?)
@@ -188,7 +194,11 @@ struct ContentView: View {
                                     saveHistory()
                                 }
                             },
+<<<<<<< HEAD
                             isOptionPressed: isOptionPressed || forceShowOptions
+=======
+                            isOptionPressed: isOptionPressed
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
                         )
                     }
                 }
@@ -207,6 +217,7 @@ struct ContentView: View {
         }
         .onDisappear {
             removeOptionKeyMonitor()
+<<<<<<< HEAD
         }
         .sheet(isPresented: $showRunningSheet) {
             VStack(alignment: .leading, spacing: 12) {
@@ -259,6 +270,8 @@ struct ContentView: View {
                 }
                 return l1 > l2
             }
+=======
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
         }
     }
     
@@ -287,6 +300,7 @@ struct ContentView: View {
         apps = allApps.sorted { $0.name < $1.name }
     }
     
+<<<<<<< HEAD
     private func loadRunningApps() {
         let running = NSWorkspace.shared.runningApplications
             .compactMap { app -> AppInfo? in
@@ -308,6 +322,8 @@ struct ContentView: View {
         showRunningSheet = false
     }
     
+=======
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
     private func selectAppManually() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -432,27 +448,40 @@ struct ContentView: View {
     private func setupOptionKeyMonitor() {
         // 使用 NSEvent 监听修饰键变化
         NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
+<<<<<<< HEAD
                 let optionKeyPressed = event.modifierFlags.contains(.option)
                 let commandKeyPressed = event.modifierFlags.contains(.command)
             DispatchQueue.main.async {
                 self.isOptionPressed = optionKeyPressed
                     self.isCommandPressed = commandKeyPressed
+=======
+            let optionKeyPressed = event.modifierFlags.contains(.option)
+            DispatchQueue.main.async {
+                self.isOptionPressed = optionKeyPressed
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
             }
             return event
         }
         
         // 也监听普通按键事件来更新状态
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+<<<<<<< HEAD
                 let optionKeyPressed = event.modifierFlags.contains(.option)
                 let commandKeyPressed = event.modifierFlags.contains(.command)
             DispatchQueue.main.async {
                 self.isOptionPressed = optionKeyPressed
                     self.isCommandPressed = commandKeyPressed
+=======
+            let optionKeyPressed = event.modifierFlags.contains(.option)
+            DispatchQueue.main.async {
+                self.isOptionPressed = optionKeyPressed
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
             }
             return event
         }
         
         // 初始检查 Option 键状态
+<<<<<<< HEAD
             checkModifierKeyState()
         
         // 定期检查 Option 键状态（作为备用方案）
@@ -467,6 +496,22 @@ struct ContentView: View {
             let commandPressed = currentFlags.contains(.command)
             if isOptionPressed != optionPressed { isOptionPressed = optionPressed }
             if isCommandPressed != commandPressed { isCommandPressed = commandPressed }
+=======
+        checkOptionKeyState()
+        
+        // 定期检查 Option 键状态（作为备用方案）
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            self.checkOptionKeyState()
+        }
+    }
+    
+    private func checkOptionKeyState() {
+        let currentFlags = NSEvent.modifierFlags
+        let optionPressed = currentFlags.contains(.option)
+        if isOptionPressed != optionPressed {
+            isOptionPressed = optionPressed
+        }
+>>>>>>> 1ab63c546da56f7ec47085b81788e7a7f2437001
     }
     
     private func removeOptionKeyMonitor() {
