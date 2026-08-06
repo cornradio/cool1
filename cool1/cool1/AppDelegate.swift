@@ -38,11 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         displayModeCancellable = appState.$displayMode
             .sink { [weak self] mode in
                 self?.applyDisplayMode(mode)
-                // 延后到下一个 runloop 再读 appState.displayMode：@Published 在 willSet 时就已经
-                // 把新值发给订阅者了，这时候属性本身还没真正写入，这里同步读会拿到旧值
-                DispatchQueue.main.async {
-                    self?.rebuildStatusItemMenu()
-                }
+                self?.rebuildStatusItemMenu()
             }
         applyDisplayMode(appState.displayMode)
 
@@ -58,12 +54,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         hideDockIconCancellable = appState.$hideDockIcon
             .dropFirst()
-            .sink { [weak self] hideDockIcon in
-                guard let self, self.appState.displayMode == .window else { return }
-                // 直接用 sink 拿到的新值，不要再同步读 appState.hideDockIcon——
-                // @Published 在 willSet 时就已经把新值发出去了，这时候属性本身还没写入，
-                // 同步读会拿到切换前的旧值，导致这个开关表现得跟预期相反
-                NSApp.setActivationPolicy(hideDockIcon ? .accessory : .regular)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.applyDisplayMode(self.appState.displayMode)
             }
     }
 

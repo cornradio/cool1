@@ -257,8 +257,6 @@ struct ContentView: View {
     @AppStorage(PersistedKeys.gridIconSize) private var gridIconSize: Double = 64
     @State private var draggedHistoryApp: AppInfo?
     @State private var isTargetedForAppDrop = false
-    @State private var flagsChangedMonitor: Any?
-    @State private var keyEventMonitor: Any?
     
     var body: some View {
         HStack {
@@ -661,41 +659,46 @@ struct ContentView: View {
     }
     
     private func setupOptionKeyMonitor() {
-        // 先清理一次，避免弹出面板反复打开时监听器越叠越多
-        removeOptionKeyMonitor()
-        
-        // 只用事件驱动的本地监听（只有 cool1 是前台、真正收到键盘事件时才会触发，
-        // 不会在别的 app 是前台时持续跑），不再用常驻的轮询 Timer
-        flagsChangedMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
-            self.isOptionPressed = event.modifierFlags.contains(.option)
-            self.isCommandPressed = event.modifierFlags.contains(.command)
+        // 使用 NSEvent 监听修饰键变化
+        NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
+                let optionKeyPressed = event.modifierFlags.contains(.option)
+                let commandKeyPressed = event.modifierFlags.contains(.command)
+            DispatchQueue.main.async {
+                self.isOptionPressed = optionKeyPressed
+                    self.isCommandPressed = commandKeyPressed
+            }
             return event
         }
         
-        keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
-            self.isOptionPressed = event.modifierFlags.contains(.option)
-            self.isCommandPressed = event.modifierFlags.contains(.command)
+        // 也监听普通按键事件来更新状态
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+                let optionKeyPressed = event.modifierFlags.contains(.option)
+                let commandKeyPressed = event.modifierFlags.contains(.command)
+            DispatchQueue.main.async {
+                self.isOptionPressed = optionKeyPressed
+                    self.isCommandPressed = commandKeyPressed
+            }
             return event
         }
         
-        // 只在刚出现时读一次当前修饰键状态（比如面板打开时键已经按住了），之后全靠事件驱动
-        checkModifierKeyState()
+        // 初始检查 Option 键状态
+            checkModifierKeyState()
+        
+        // 定期检查 Option 键状态（作为备用方案）
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                self.checkModifierKeyState()
+        }
     }
     
-    private func checkModifierKeyState() {
+        private func checkModifierKeyState() {
         let currentFlags = NSEvent.modifierFlags
-        isOptionPressed = currentFlags.contains(.option)
-        isCommandPressed = currentFlags.contains(.command)
+        let optionPressed = currentFlags.contains(.option)
+            let commandPressed = currentFlags.contains(.command)
+            if isOptionPressed != optionPressed { isOptionPressed = optionPressed }
+            if isCommandPressed != commandPressed { isCommandPressed = commandPressed }
     }
     
     private func removeOptionKeyMonitor() {
-        if let flagsChangedMonitor {
-            NSEvent.removeMonitor(flagsChangedMonitor)
-            self.flagsChangedMonitor = nil
-        }
-        if let keyEventMonitor {
-            NSEvent.removeMonitor(keyEventMonitor)
-            self.keyEventMonitor = nil
-        }
+        // 清理监控器（如果需要）
     }
 }
