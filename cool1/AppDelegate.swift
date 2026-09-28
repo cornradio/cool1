@@ -21,13 +21,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "fish.fill", accessibilityDescription: "App Icon")
-
-            // 添加左键点击手势
-            let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
-            button.addGestureRecognizer(clickGesture)
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-
-        rebuildStatusItemMenu()
 
         // 创建弹出窗口
         popover = NSPopover()
@@ -38,11 +35,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         displayModeCancellable = appState.$displayMode
             .sink { [weak self] mode in
                 self?.applyDisplayMode(mode)
-                // 延后到下一个 runloop 再读 appState.displayMode：@Published 在 willSet 时就已经
-                // 把新值发给订阅者了，这时候属性本身还没真正写入，这里同步读会拿到旧值
-                DispatchQueue.main.async {
-                    self?.rebuildStatusItemMenu()
-                }
             }
         applyDisplayMode(appState.displayMode)
 
@@ -108,8 +100,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             window.title = "酷鱼"
             window.isReleasedWhenClosed = false
-            window.isOpaque = false
-            window.backgroundColor = .clear
             window.contentViewController = NSHostingController(rootView: ContentView().environmentObject(appState).environmentObject(historyModel))
             let hasSavedFrame = UserDefaults.standard.string(forKey: "NSWindow Frame cool1MainWindow") != nil
             window.setFrameAutosaveName("cool1MainWindow")
@@ -127,12 +117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showMainWindow()
             return
         }
-        if window.isKeyWindow {
-            window.orderOut(nil)
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-        }
+        window.orderOut(nil)
     }
 
     private func showSettingsWindow() {
@@ -153,7 +138,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func rebuildStatusItemMenu() {
+    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp {
+            // 右键：显示菜单
+            let menu = buildStatusItemMenu()
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+        } else {
+            // 左键：弹出/收起窗口
+            wakeUp()
+        }
+    }
+
+    private func buildStatusItemMenu() -> NSMenu {
         let menu = NSMenu()
 
         let menuBarItem = NSMenuItem(title: "任务栏模式", action: #selector(selectMenuBarMode), keyEquivalent: "")
@@ -170,7 +167,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "设置...", action: #selector(openSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "帮助", action: #selector(showHelp), keyEquivalent: "h"))
         menu.addItem(NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q"))
-        statusItem?.menu = menu
+        return menu
     }
 
     @objc func selectMenuBarMode() {
@@ -189,17 +186,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showHelp() {
         if let url = URL(string: "https://github.com/cornradio/cool1/") {
             NSWorkspace.shared.open(url)
-        }
-    }
-
-    @objc func handleClick(sender: NSClickGestureRecognizer) {
-        if sender.buttonMask == 0x1 {  // 左键点击
-            switch appState.displayMode {
-            case .menuBar:
-                togglePopover()
-            case .window:
-                toggleMainWindow()
-            }
         }
     }
 

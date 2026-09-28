@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var historyModel: HistoryModel
     @AppStorage(PersistedKeys.gridIconSize) private var gridIconSize: Double = 64
+    @AppStorage(PersistedKeys.appPickerStyle) private var appPickerStyleRaw: String = "text"
     @State private var statusMessage: String = ""
 
     private let usageText = """
@@ -19,125 +20,120 @@ struct SettingsView: View {
     """
 
     var body: some View {
-        TabView {
-            usageTab
-                .tabItem { Label("使用说明", systemImage: "book") }
-            ShortcutSettingsSection()
-                .padding(20)
-                .tabItem { Label("快捷键", systemImage: "keyboard") }
-            appearanceTab
-                .tabItem { Label("外观", systemImage: "square.grid.2x2") }
-            dataTab
-                .tabItem { Label("数据", systemImage: "tray.and.arrow.down") }
-            helpTab
-                .tabItem { Label("帮助", systemImage: "questionmark.circle") }
-        }
-        .frame(width: 440, height: 460)
-    }
-
-    private var usageTab: some View {
         ScrollView {
-            Text(usageText)
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
-        }
-    }
+            VStack(alignment: .leading, spacing: 24) {
+                // 快捷键
+                ShortcutSettingsSection()
 
-    private var appearanceTab: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("大图标模式")
-                .font(.headline)
-            HStack {
-                Text("图标大小")
-                Slider(value: $gridIconSize, in: 40...128, step: 4)
-                Text("\(Int(gridIconSize))")
-                    .frame(width: 30, alignment: .trailing)
-                    .foregroundColor(.secondary)
-            }
+                Divider()
 
-            Divider()
-
-            Text("窗口模式")
-                .font(.headline)
-            Toggle("不在 Dock 中显示", isOn: $appState.hideDockIcon)
-            Text("开启后，切换到普通窗口模式时也不会出现在 Dock 里，只能从状态栏图标或快捷键唤醒。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Spacer()
-        }
-        .padding(20)
-    }
-
-    private var dataTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("导入应用")
-                    .font(.headline)
-                Text("一次性把所有已安装的应用加入历史记录，方便直接在列表/大图标里启动。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Button("导入所有已安装应用") {
-                    let count = historyModel.importAllInstalledApps()
-                    statusMessage = count > 0 ? "已导入 \(count) 个新应用" : "没有新的应用需要导入"
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("备份与恢复")
-                    .font(.headline)
-                Text("把历史记录、显示模式和快捷键等配置导出成文件，或从文件恢复。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                HStack {
-                    Button("导出配置...") {
-                        exportConfig()
+                // 外观
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("大图标模式")
+                        .font(.headline)
+                    HStack {
+                        Text("图标大小")
+                        Slider(value: $gridIconSize, in: 40...128, step: 4)
+                        Text("\(Int(gridIconSize))")
+                            .frame(width: 30, alignment: .trailing)
+                            .foregroundColor(.secondary)
                     }
-                    Button("导入配置...") {
-                        importConfig()
+
+                    Divider()
+
+                    Text("窗口模式")
+                        .font(.headline)
+                    Toggle("不在 Dock 中显示", isOn: $appState.hideDockIcon)
+                    Text("开启后，切换到普通窗口模式时也不会出现在 Dock 里，只能从状态栏图标或快捷键唤醒。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Divider()
+
+                    Text("应用选择器样式")
+                        .font(.headline)
+                    Picker("应用选择器", selection: $appPickerStyleRaw) {
+                        Text("传统（纯文字）").tag("text")
+                        Text("有图标").tag("icon")
+                    }
+                    .pickerStyle(. segmented)
+                    .frame(width: 300)
+                    Text("有图标模式下下拉列表会显示应用图标，但可能略卡。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Divider()
+
+                // 数据
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("导入应用")
+                        .font(.headline)
+                    Text("一次性把所有已安装的应用加入历史记录，方便直接在列表/大图标里启动。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("导入所有已安装应用") {
+                        let count = historyModel.importAllInstalledApps()
+                        statusMessage = count > 0 ? "已导入 \(count) 个新应用" : "没有新的应用需要导入"
                     }
                 }
-            }
 
-            if !statusMessage.isEmpty {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("备份与恢复")
+                        .font(.headline)
+                    Text("把历史记录、显示模式和快捷键等配置导出成文件，或从文件恢复。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    HStack {
+                        Button("导出配置...") { exportConfig() }
+                        Button("导入配置...") { importConfig() }
+                    }
+                    if !statusMessage.isEmpty {
+                        Text(statusMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
 
-            Spacer()
-        }
-        .padding(20)
-    }
+                Divider()
 
-    private var helpTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("酷鱼 cool1")
-                .font(.headline)
-            Text("版本 \(appVersion)")
-                .font(.callout)
-                .foregroundColor(.secondary)
+                // 帮助
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("酷鱼 cool1")
+                        .font(.headline)
+                    Text("版本 \(appVersion)")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
 
-            Divider()
+                    Divider()
 
-            Button("查看更新 / 下载最新版") {
-                if let url = URL(string: "https://github.com/cornradio/cool1/releases") {
-                    NSWorkspace.shared.open(url)
+                    Button("查看更新 / 下载最新版") {
+                        if let url = URL(string: "https://github.com/cornradio/cool1/releases") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    Button("GitHub 项目主页") {
+                        if let url = URL(string: "https://github.com/cornradio/cool1/") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+
+                Divider()
+
+                // 使用说明放最下面
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("使用说明")
+                        .font(.headline)
+                    Text(usageText)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            Button("GitHub 项目主页") {
-                if let url = URL(string: "https://github.com/cornradio/cool1/") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-
-            Spacer()
+            .padding(20)
         }
-        .padding(20)
+        .frame(width: 460, height: 520)
     }
 
     private var appVersion: String {

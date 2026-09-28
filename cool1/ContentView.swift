@@ -19,6 +19,118 @@ private struct ScaleButtonStyle: ButtonStyle {
     }
 }
 
+private struct AppPickerMenu: NSViewRepresentable {
+    let apps: [AppInfo]
+    @Binding var selectedApp: AppInfo?
+    let onSelect: (AppInfo) -> Void
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+            let button = NSPopUpButton()
+            button.target = context.coordinator
+            button.action = #selector(Coordinator.itemSelected(_:))
+            button.isBordered = false
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: 13)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            rebuildMenu(button: button)
+            return button
+        }
+
+        func updateNSView(_ nsView: NSPopUpButton, context: Context) {
+            context.coordinator.apps = apps
+            context.coordinator.onSelect = onSelect
+            // 只在列表内容变化时重建
+            let currentTitles = nsView.itemTitles
+            let newTitles = ["（无选择）"] + apps.map(\.name)
+            if currentTitles != newTitles {
+                rebuildMenu(button: nsView)
+            }
+            // 同步选中项
+            let targetTitle = selectedApp?.name ?? "（无选择）"
+            if nsView.titleOfSelectedItem != targetTitle {
+                nsView.selectItem(withTitle: targetTitle)
+            }
+        }
+
+        private func rebuildMenu(button: NSPopUpButton) {
+            button.removeAllItems()
+            button.addItem(withTitle: "（无选择）")
+            button.menu?.items[0].image = NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
+
+            for app in apps {
+                let item = NSMenuItem(title: app.name, action: nil, keyEquivalent: "")
+                item.image = NSWorkspace.shared.icon(forFile: app.path)
+                item.image?.size = NSSize(width: 16, height: 16)
+                button.menu?.addItem(item)
+            }
+            button.selectItem(withTitle: selectedApp?.name ?? "（无选择）")
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
+            let h: CGFloat = 22
+            nsView.heightAnchor.constraint(equalToConstant: h).isActive = true
+            return CGSize(width: proposal.width ?? 200, height: h)
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+        final class Coordinator: NSObject {
+            var parent: AppPickerMenu
+            var apps: [AppInfo]
+            var onSelect: (AppInfo) -> Void
+
+            init(_ parent: AppPickerMenu) {
+                self.parent = parent
+                self.apps = parent.apps
+                self.onSelect = parent.onSelect
+            }
+
+            @objc func itemSelected(_ sender: NSPopUpButton) {
+                let index = sender.indexOfSelectedItem
+                if index == 0 {
+                    parent.selectedApp = nil
+                } else if index > 0 && index - 1 < apps.count {
+                    let app = apps[index - 1]
+                    onSelect(app)
+                }
+            }
+        }
+    }
+
+    private struct AppSearchResultRow: View {
+    let app: AppInfo
+    let onLaunch: () -> Void
+    @EnvironmentObject var historyModel: HistoryModel
+
+    var body: some View {
+        HStack {
+            Button(action: onLaunch) {
+                Image(systemName: "arrowtriangle.forward")
+                    .foregroundColor(.white)
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .help("启动应用")
+
+            if let icon = appIcon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: "app.fill")
+                    .resizable()
+                    .frame(width: 20, height: 20)
+            }
+
+            Text(app.name)
+            Spacer()
+        }
+    }
+
+    private var appIcon: NSImage? {
+        historyModel.icon(for: app.path)
+    }
+}
+
 struct HistoryItemView: View {
     let app: AppInfo
     let onLaunch: () -> Void
@@ -36,6 +148,7 @@ struct HistoryItemView: View {
                     .foregroundColor(isRunning ? .green : .white)
             }
             .buttonStyle(ScaleButtonStyle())
+            .help("启动应用")
             
             if let icon = appIcon {
                 Image(nsImage: icon)
@@ -56,17 +169,20 @@ struct HistoryItemView: View {
                     Button(action: onKill) {
                         Image(systemName: "xmark.circle.fill")
                     }
+                    .help("停止程序")
                 }
                 
                 Button(action: onDelete) {
                     Image(systemName: "trash.fill")
                 }
+                .help("删除")
             }
             
             Button(action: onToggleFavorite) {
                 Image(systemName: app.isFavorite ? "star.fill" : "star")
                     .foregroundColor(app.isFavorite ? .yellow : .gray)
             }
+            .help(app.isFavorite ? "取消收藏" : "收藏")
         }
         .draggable(app.id.uuidString) { Text(app.name) }
         .dropDestination(for: String.self) { items, location in
@@ -136,6 +252,7 @@ struct HistoryGridItemView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.plain)
+                .help(app.isFavorite ? "取消收藏" : "收藏")
                 .offset(x: 6, y: -6)
                 
                 if isRunning {
@@ -229,6 +346,11 @@ private struct VisualEffectBackground: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
+private enum AppPickerStyle: String {
+    case text
+    case icon
+}
+
 struct ContentView: View {
     private enum HistorySortMode: String, CaseIterable, Identifiable {
         case manual = "手工顺序"
@@ -255,6 +377,11 @@ struct ContentView: View {
     @State private var historySearchText: String = ""
     @AppStorage(PersistedKeys.historyViewMode) private var historyViewMode: HistoryViewMode = .list
     @AppStorage(PersistedKeys.gridIconSize) private var gridIconSize: Double = 64
+    @AppStorage(PersistedKeys.appPickerStyle) private var appPickerStyleRaw: String = "text"
+
+    private var appPickerStyle: AppPickerStyle {
+        AppPickerStyle(rawValue: appPickerStyleRaw) ?? .text
+    }
     @State private var draggedHistoryApp: AppInfo?
     @State private var isTargetedForAppDrop = false
     @State private var flagsChangedMonitor: Any?
@@ -297,13 +424,13 @@ struct ContentView: View {
                     Button(action: { showOnlyFavorites.toggle() }) {
                         Image(systemName: showOnlyFavorites ? "command" : "command")
                     }
-                    .help(showOnlyFavorites ? "显示全部" : "仅显示收藏")
+                    .help(showOnlyFavorites ? "显示全部（按住 ⌘ 临时仅显示收藏）" : "仅显示收藏（按住 ⌘ 临时启用）")
                     .disabled(historyModel.history.filter { $0.isFavorite }.isEmpty)
                     
                     Button(action: { forceShowOptions.toggle() }) {
                         Image(systemName: forceShowOptions ? "option" : "option")
                     }
-                    .help(forceShowOptions ? "隐藏额外操作" : "显示额外操作")
+                    .help(forceShowOptions ? "隐藏额外操作（按住 ⌥ 临时启用）" : "显示额外操作：停止 / 删除 / 仅运行应用（按住 ⌥ 临时启用）")
                     
                     Button(action: { historyViewMode = historyViewMode == .list ? .grid : .list }) {
                         Image(systemName: historyViewMode == .list ? "square.grid.2x2" : "list.bullet")
@@ -312,26 +439,50 @@ struct ContentView: View {
                 }
                 
                 if historyViewMode == .list {
-                    List {
-                        ForEach(displayedHistory) { app in
-                            HistoryItemView(
-                                app: app,
-                                onLaunch: { launchAppFromHistory(app: app) },
-                                onToggleFavorite: { toggleFavorite(app: app) },
-                                onDelete: { deleteAppFromHistory(app: app) },
-                                onKill: { killApp(app: app) },
-                                onMove: moveHistoryItem,
-                                isOptionPressed: isOptionPressed || forceShowOptions
-                            )
+                    if displayedHistory.isEmpty && !historySearchText.isEmpty {
+                        // 历史记录无匹配，从已安装应用列表里搜
+                        List {
+                            if appSearchResults.isEmpty {
+                                Text("没有找到匹配的应用")
+                                    .foregroundColor(.secondary)
+                                    .font(.callout)
+                            } else {
+                                ForEach(appSearchResults) { app in
+                                    AppSearchResultRow(app: app, onLaunch: { launchAppFromHistory(app: app) })
+                                }
+                            }
                         }
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
+                    } else {
+                        List {
+                            ForEach(displayedHistory) { app in
+                                HistoryItemView(
+                                    app: app,
+                                    onLaunch: { launchAppFromHistory(app: app) },
+                                    onToggleFavorite: { toggleFavorite(app: app) },
+                                    onDelete: { deleteAppFromHistory(app: app) },
+                                    onKill: { killApp(app: app) },
+                                    onMove: moveHistoryItem,
+                                    isOptionPressed: isOptionPressed || forceShowOptions
+                                )
+                            }
+                        }
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
                     }
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
                 } else {
-                    if isOptionPressed {
-                        Text("⌥ 仅显示正在运行的应用")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    HStack(spacing: 12) {
+                        if isOptionPressed {
+                            Text("⌥ 仅显示正在运行的应用")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        if isCommandPressed {
+                            Text("⌘ 仅显示收藏")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: CGFloat(gridIconSize) + 20))], spacing: 16) {
@@ -429,20 +580,32 @@ struct ContentView: View {
     
     @ViewBuilder
     private var appSelectorControls: some View {
-        Picker("选择应用", selection: Binding(
-            get: { selectedApp },
-            set: { newValue in
-                selectedApp = newValue
-                if newValue != nil {
+        if appPickerStyle == .icon {
+            AppPickerMenu(
+                apps: historyModel.apps,
+                selectedApp: $selectedApp,
+                onSelect: { app in
+                    selectedApp = app
                     launchSelectedApp()
                 }
+            )
+        } else {
+            Picker("选择应用", selection: Binding(
+                get: { selectedApp },
+                set: { newValue in
+                    selectedApp = newValue
+                    if newValue != nil {
+                        launchSelectedApp()
+                    }
+                }
+            )) {
+                Text("无选择").tag(nil as AppInfo?)
+                ForEach(historyModel.apps) { app in
+                    Text(app.name).tag(app as AppInfo?)
+                }
             }
-        )) {
-            ForEach(historyModel.apps) { app in
-                Text(app.name).tag(app as AppInfo?)
-            }
+            .pickerStyle(MenuPickerStyle())
         }
-        .pickerStyle(MenuPickerStyle())
 
         Menu {
             Button("从文件夹选择...") {
@@ -492,7 +655,7 @@ struct ContentView: View {
             base = base.filter { historyModel.isRunning(path: $0.path) }
         }
         if !historySearchText.isEmpty {
-            base = base.filter { $0.name.localizedCaseInsensitiveContains(historySearchText) }
+            base = base.filter { appNameMatches(query: historySearchText, name: $0.name) }
         }
         switch historySortMode {
         case .manual:
@@ -509,6 +672,37 @@ struct ContentView: View {
         }
     }
     
+    private var appSearchResults: [AppInfo] {
+        guard !historySearchText.isEmpty else { return [] }
+        let historyPaths = Set(historyModel.history.map { $0.path })
+        return historyModel.apps
+            .filter { !historyPaths.contains($0.path) && appNameMatches(query: historySearchText, name: $0.name) }
+            .sorted { $0.name < $1.name }
+    }
+
+    private func appNameMatches(query: String, name: String) -> Bool {
+        // 1. 原始名称直接匹配
+        if name.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        // 2. 拼音首字母 + 全拼匹配
+        let full = pinyinString(name)
+        let initials = pinyinInitials(fromFullPinyin: full)
+        let q = query.lowercased()
+        return full.contains(q) || initials.hasPrefix(q) || initials.contains(q)
+    }
+
+    private func pinyinString(_ string: String) -> String {
+        let ms = NSMutableString(string: string) as CFMutableString
+        CFStringTransform(ms, nil, kCFStringTransformToLatin, false)
+        CFStringTransform(ms, nil, kCFStringTransformStripDiacritics, false)
+        return (ms as String).lowercased()
+    }
+
+    private func pinyinInitials(fromFullPinyin full: String) -> String {
+        full.split(separator: " ").compactMap { $0.first }.map { String($0) }.joined()
+    }
+
     private func loadRunningApps() {
         let running = NSWorkspace.shared.runningApplications
             .compactMap { app -> AppInfo? in

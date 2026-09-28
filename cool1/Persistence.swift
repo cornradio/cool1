@@ -3,6 +3,7 @@ import Foundation
 enum PersistedKeys {
     static let historyViewMode = "HistoryViewMode"
     static let gridIconSize = "GridIconSize"
+    static let appPickerStyle = "AppPickerStyle" // "icon" or "text"
 }
 
 struct HistoryStore {
