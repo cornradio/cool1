@@ -621,6 +621,12 @@ struct ContentView: View {
         .menuStyle(.borderlessButton)
         .frame(width: 28)
         .help("从文件夹或正在运行的程序中选择")
+
+        // 刷新应用列表
+        Button(action: { historyModel.reloadApps() }) {
+            Image(systemName: "arrow.clockwise")
+        }
+        .help("刷新应用列表")
     }
     
     @ViewBuilder

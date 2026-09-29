@@ -28,17 +28,33 @@ func scanInstalledApps() -> [AppInfo] {
     let fileManager = FileManager.default
     let appDirectories = ["/Applications", "/Applications/Utilities", "/System/Applications", "/Library/Application Support"]
     var allApps: [AppInfo] = []
+    let seenPaths = NSMutableSet()
 
     for directory in appDirectories {
-        if let appNames = try? fileManager.contentsOfDirectory(atPath: directory) {
-            let appsInDirectory = appNames.compactMap { appName -> AppInfo? in
-                guard appName.hasSuffix(".app") else { return nil }
-                let name = (appName as NSString).deletingPathExtension
-                return AppInfo(name: name, path: "\(directory)/\(appName)")
-            }
-            allApps.append(contentsOf: appsInDirectory)
-        }
+        scanDirectory(directory, fileManager: fileManager, allApps: &allApps, seenPaths: seenPaths)
     }
 
     return allApps.sorted { $0.name < $1.name }
+}
+
+private func scanDirectory(_ directory: String, fileManager: FileManager, allApps: inout [AppInfo], seenPaths: NSMutableSet) {
+    guard let entries = try? fileManager.contentsOfDirectory(atPath: directory) else { return }
+
+    for entry in entries {
+        let fullPath = "\(directory)/\(entry)"
+
+        if entry.hasSuffix(".app") {
+            if !seenPaths.contains(fullPath) {
+                seenPaths.add(fullPath)
+                let name = (entry as NSString).deletingPathExtension
+                allApps.append(AppInfo(name: name, path: fullPath))
+            }
+        } else {
+            // 嵌套文件夹：递归扫描
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue {
+                scanDirectory(fullPath, fileManager: fileManager, allApps: &allApps, seenPaths: seenPaths)
+            }
+        }
+    }
 }
