@@ -492,49 +492,61 @@ struct ContentView: View {
                 
                 if historyViewMode == .list {
                     if displayedHistory.isEmpty && !historySearchText.isEmpty {
-                        List {
-                            if appSearchResults.isEmpty {
-                                Text("没有找到匹配的应用")
-                                    .foregroundColor(.secondary)
-                                    .font(.callout)
-                            } else {
-                                ForEach(appSearchResults) { app in
-                                    AppSearchResultRow(app: app, onLaunch: { launchAppFromHistory(app: app) })
-                                        .tag(app.id)
-                                        .listRowBackground(
-                                            keyboardSelectedId == app.id && isInSelectMode
-                                                ? Color.accentColor.opacity(0.35)
-                                                : Color.clear
-                                        )
-                                        .listRowSeparator(.hidden)
+                        ScrollViewReader { proxy in
+                            List {
+                                if appSearchResults.isEmpty {
+                                    Text("没有找到匹配的应用")
+                                        .foregroundColor(.secondary)
+                                        .font(.callout)
+                                } else {
+                                    ForEach(appSearchResults) { app in
+                                        AppSearchResultRow(app: app, onLaunch: { launchAppFromHistory(app: app) })
+                                            .id(app.id)
+                                            .tag(app.id)
+                                            .listRowBackground(
+                                                keyboardSelectedId == app.id && isInSelectMode
+                                                    ? Color.accentColor.opacity(0.35)
+                                                    : Color.clear
+                                            )
+                                            .listRowSeparator(.hidden)
+                                    }
                                 }
                             }
-                        }
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                    } else {
-                        List {
-                            ForEach(displayedHistory) { app in
-                                HistoryItemView(
-                                    app: app,
-                                    onLaunch: { launchAppFromHistory(app: app) },
-                                    onToggleFavorite: { toggleFavorite(app: app) },
-                                    onDelete: { deleteAppFromHistory(app: app) },
-                                    onKill: { killApp(app: app) },
-                                    onMove: moveHistoryItem,
-                                    isOptionPressed: isOptionPressed || forceShowOptions
-                                )
-                                .tag(app.id)
-                                .listRowBackground(
-                                    keyboardSelectedId == app.id && isInSelectMode
-                                        ? Color.accentColor.opacity(0.35)
-                                        : Color.clear
-                                )
-                                .listRowSeparator(.hidden)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
+                            .onChange(of: keyboardSelectedId) { id in
+                                scrollListToSelection(proxy: proxy, id: id)
                             }
                         }
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
+                    } else {
+                        ScrollViewReader { proxy in
+                            List {
+                                ForEach(displayedHistory) { app in
+                                    HistoryItemView(
+                                        app: app,
+                                        onLaunch: { launchAppFromHistory(app: app) },
+                                        onToggleFavorite: { toggleFavorite(app: app) },
+                                        onDelete: { deleteAppFromHistory(app: app) },
+                                        onKill: { killApp(app: app) },
+                                        onMove: moveHistoryItem,
+                                        isOptionPressed: isOptionPressed || forceShowOptions
+                                    )
+                                    .id(app.id)
+                                    .tag(app.id)
+                                    .listRowBackground(
+                                        keyboardSelectedId == app.id && isInSelectMode
+                                            ? Color.accentColor.opacity(0.35)
+                                            : Color.clear
+                                    )
+                                    .listRowSeparator(.hidden)
+                                }
+                            }
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
+                            .onChange(of: keyboardSelectedId) { id in
+                                scrollListToSelection(proxy: proxy, id: id)
+                            }
+                        }
                     }
                 } else {
                     HStack(spacing: 12) {
@@ -549,43 +561,49 @@ struct ContentView: View {
                                 .foregroundColor(.secondary)
                         }
                     }
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: CGFloat(gridIconSize) + 20), spacing: 16)], spacing: 16) {
-                            ForEach(displayedHistory) { app in
-                                HistoryGridItemView(
-                                    app: app,
-                                    iconSize: CGFloat(gridIconSize),
-                                    onLaunch: { launchAppFromHistory(app: app) },
-                                    onToggleFavorite: { toggleFavorite(app: app) },
-                                    onDelete: { deleteAppFromHistory(app: app) },
-                                    onKill: { killApp(app: app) },
-                                    isSelected: keyboardSelectedId == app.id && isInSelectMode
-                                )
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: GridItemFramesPreferenceKey.self,
-                                            value: [app.id: geo.frame(in: .named("historyGrid"))]
-                                        )
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: CGFloat(gridIconSize) + 20), spacing: 16)], spacing: 16) {
+                                ForEach(displayedHistory) { app in
+                                    HistoryGridItemView(
+                                        app: app,
+                                        iconSize: CGFloat(gridIconSize),
+                                        onLaunch: { launchAppFromHistory(app: app) },
+                                        onToggleFavorite: { toggleFavorite(app: app) },
+                                        onDelete: { deleteAppFromHistory(app: app) },
+                                        onKill: { killApp(app: app) },
+                                        isSelected: keyboardSelectedId == app.id && isInSelectMode
+                                    )
+                                    .id(app.id)
+                                    .background(
+                                        GeometryReader { geo in
+                                            Color.clear.preference(
+                                                key: GridItemFramesPreferenceKey.self,
+                                                value: [app.id: geo.frame(in: .named("historyGrid"))]
+                                            )
+                                        }
+                                    )
+                                    .onDrag {
+                                        draggedHistoryApp = app
+                                        return NSItemProvider(object: app.id.uuidString as NSString)
                                     }
-                                )
-                                .onDrag {
-                                    draggedHistoryApp = app
-                                    return NSItemProvider(object: app.id.uuidString as NSString)
+                                    .onDrop(of: [.text], delegate: HistoryGridDropDelegate(
+                                        item: app,
+                                        history: $historyModel.history,
+                                        draggedItem: $draggedHistoryApp,
+                                        isManualSort: historySortMode == .manual,
+                                        onReorder: { historyModel.save() }
+                                    ))
                                 }
-                                .onDrop(of: [.text], delegate: HistoryGridDropDelegate(
-                                    item: app,
-                                    history: $historyModel.history,
-                                    draggedItem: $draggedHistoryApp,
-                                    isManualSort: historySortMode == .manual,
-                                    onReorder: { historyModel.save() }
-                                ))
+                            }
+                            .padding(.vertical, 8)
+                            .coordinateSpace(name: "historyGrid")
+                            .onPreferenceChange(GridItemFramesPreferenceKey.self) { frames in
+                                gridItemFrames = frames
                             }
                         }
-                        .padding(.vertical, 8)
-                        .coordinateSpace(name: "historyGrid")
-                        .onPreferenceChange(GridItemFramesPreferenceKey.self) { frames in
-                            gridItemFrames = frames
+                        .onChange(of: keyboardSelectedId) { id in
+                            scrollListToSelection(proxy: proxy, id: id)
                         }
                     }
                 }
@@ -753,21 +771,75 @@ struct ContentView: View {
         searchFieldFocused = true
     }
 
-    private func moveKeyboardSelection(dx: Int = 0, dy: Int = 0) {
+    private func scrollListToSelection(proxy: ScrollViewProxy, id: UUID?) {
+        guard isInSelectMode, let id else { return }
+        withAnimation(.easeInOut(duration: 0.12)) {
+            proxy.scrollTo(id, anchor: .center)
+        }
+    }
+
+    /// 从当前可见布局推断网格列数（取同行最多的那一行）
+    private func inferredGridColumns() -> Int {
+        let frames = Array(gridItemFrames.values)
+        guard !frames.isEmpty else { return 1 }
+        var maxCount = 1
+        for frame in frames {
+            let tol = max(frame.height * 0.55, 8)
+            let count = frames.filter { abs($0.midY - frame.midY) <= tol }.count
+            maxCount = max(maxCount, count)
+        }
+        return max(1, maxCount)
+    }
+
+    private func moveKeyboardSelection(dx: Int = 0, dy: Int = 0, toEdge: Bool = false) {
         let candidates = displayedHistory.isEmpty ? appSearchResults : displayedHistory
         guard !candidates.isEmpty else { return }
 
-        // 列表模式：一维顺序
+        // 列表模式：一维顺序；Shift = 跳到首/尾
         if historyViewMode == .list {
-            let currentIndex = keyboardSelectedId.flatMap { id in candidates.firstIndex(where: { $0.id == id }) } ?? 0
-            let newIndex = currentIndex + dx + dy
-            if newIndex >= 0 && newIndex < candidates.count {
-                keyboardSelectedId = candidates[newIndex].id
+            if toEdge {
+                if dy > 0 || dx > 0 {
+                    keyboardSelectedId = candidates.last?.id
+                } else if dy < 0 || dx < 0 {
+                    keyboardSelectedId = candidates.first?.id
+                }
+            } else {
+                let currentIndex = keyboardSelectedId.flatMap { id in candidates.firstIndex(where: { $0.id == id }) } ?? 0
+                let newIndex = currentIndex + dx + dy
+                if newIndex >= 0 && newIndex < candidates.count {
+                    keyboardSelectedId = candidates[newIndex].id
+                }
             }
             return
         }
 
-        // 图标模式：根据实际布局 frame 找上下左右邻居（窗口宽度变化时列数自动对）
+        let currentIndex = keyboardSelectedId.flatMap { id in candidates.firstIndex(where: { $0.id == id }) } ?? 0
+
+        // 图标模式 + Shift：按行列跳到该方向尽头
+        if toEdge {
+            let columns = inferredGridColumns()
+            let row = currentIndex / columns
+            let col = currentIndex % columns
+            let count = candidates.count
+            let newIndex: Int
+            if dx > 0 {
+                newIndex = min(row * columns + columns - 1, count - 1)
+            } else if dx < 0 {
+                newIndex = row * columns
+            } else if dy > 0 {
+                var i = col
+                while i + columns < count { i += columns }
+                newIndex = i
+            } else if dy < 0 {
+                newIndex = col
+            } else {
+                return
+            }
+            keyboardSelectedId = candidates[newIndex].id
+            return
+        }
+
+        // 图标模式：根据实际布局 frame 找上下左右邻居
         guard let currentId = keyboardSelectedId,
               let currentFrame = gridItemFrames[currentId] else {
             keyboardSelectedId = candidates.first?.id
@@ -813,7 +885,6 @@ struct ContentView: View {
             if let currentBest = best {
                 let better: Bool
                 if dy != 0 {
-                    // 上下：先对齐同一列，再取最近一行
                     if abs(neighbor.secondary - currentBest.secondary) > 1 {
                         better = neighbor.secondary < currentBest.secondary
                     } else {
@@ -1086,20 +1157,21 @@ struct ContentView: View {
                     }
                 }
 
-                // 选中模式下拦截方向键（列表一维；图标网格二维）
+                // 选中模式下拦截方向键（列表一维；图标网格二维；Shift = 跳到尽头）
                 if self.isInSelectMode {
+                    let toEdge = event.modifierFlags.contains(.shift)
                     switch event.keyCode {
                     case 125: // 下
-                        self.moveKeyboardSelection(dy: 1)
+                        self.moveKeyboardSelection(dy: 1, toEdge: toEdge)
                         return nil
                     case 126: // 上
-                        self.moveKeyboardSelection(dy: -1)
+                        self.moveKeyboardSelection(dy: -1, toEdge: toEdge)
                         return nil
                     case 124: // 右
-                        self.moveKeyboardSelection(dx: 1)
+                        self.moveKeyboardSelection(dx: 1, toEdge: toEdge)
                         return nil
                     case 123: // 左
-                        self.moveKeyboardSelection(dx: -1)
+                        self.moveKeyboardSelection(dx: -1, toEdge: toEdge)
                         return nil
                     default:
                         break
