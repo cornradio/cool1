@@ -100,6 +100,7 @@ private struct AppPickerMenu: NSViewRepresentable {
     private struct AppSearchResultRow: View {
     let app: AppInfo
     let onLaunch: () -> Void
+    var isSelected: Bool = false
     @EnvironmentObject var historyModel: HistoryModel
 
     var body: some View {
@@ -114,14 +115,20 @@ private struct AppPickerMenu: NSViewRepresentable {
             if let icon = appIcon {
                 Image(nsImage: icon)
                     .resizable()
-                    .frame(width: 20, height: 20)
+                    .frame(width: isSelected ? 28 : 20, height: isSelected ? 28 : 20)
+                    .overlay(
+                        isSelected ? RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2) : nil
+                    )
+                    .animation(.easeInOut(duration: 0.15), value: isSelected)
             } else {
                 Image(systemName: "app.fill")
                     .resizable()
-                    .frame(width: 20, height: 20)
+                    .frame(width: isSelected ? 28 : 20, height: isSelected ? 28 : 20)
+                    .animation(.easeInOut(duration: 0.15), value: isSelected)
             }
 
             Text(app.name)
+                .fontWeight(isSelected ? .semibold : .regular)
             Spacer()
         }
     }
@@ -139,6 +146,7 @@ struct HistoryItemView: View {
     let onKill: () -> Void
     let onMove: (UUID, UUID) -> Void
     let isOptionPressed: Bool
+    var isSelected: Bool = false
     @EnvironmentObject var historyModel: HistoryModel
     
     var body: some View {
@@ -153,14 +161,20 @@ struct HistoryItemView: View {
             if let icon = appIcon {
                 Image(nsImage: icon)
                     .resizable()
-                    .frame(width: 20, height: 20)
+                    .frame(width: isSelected ? 28 : 20, height: isSelected ? 28 : 20)
+                    .overlay(
+                        isSelected ? RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2) : nil
+                    )
+                    .animation(.easeInOut(duration: 0.15), value: isSelected)
             } else {
                 Image(systemName: "app.fill")
                     .resizable()
-                    .frame(width: 20, height: 20)
+                    .frame(width: isSelected ? 28 : 20, height: isSelected ? 28 : 20)
+                    .animation(.easeInOut(duration: 0.15), value: isSelected)
             }
             
             Text(app.name)
+                .fontWeight(isSelected ? .semibold : .regular)
             Spacer()
             
             // 只有在按住 Option 键时才显示 kill 和 delete 按钮
@@ -212,6 +226,7 @@ struct HistoryGridItemView: View {
     let onToggleFavorite: () -> Void
     let onDelete: () -> Void
     let onKill: () -> Void
+    var isSelected: Bool = false
     @EnvironmentObject var historyModel: HistoryModel
     @State private var isPressed = false
     
@@ -271,6 +286,10 @@ struct HistoryGridItemView: View {
                 .frame(width: cellWidth - 4)
         }
         .frame(width: cellWidth)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
         .contextMenu {
             Button(action: onToggleFavorite) {
                 Label(app.isFavorite ? "取消收藏" : "收藏", systemImage: app.isFavorite ? "star.slash" : "star")
@@ -346,9 +365,38 @@ private struct VisualEffectBackground: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
+/// 收集图标网格里每个 cell 的实际布局 frame，用于二维方向键导航
+private struct GridItemFramesPreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
 private enum AppPickerStyle: String {
     case text
     case icon
+}
+
+private struct ArrowKeyHandler: ViewModifier {
+    let onUp: () -> Void
+    let onDown: () -> Void
+    let onLeft: () -> Void
+    let onRight: () -> Void
+    let onReturn: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14.0, *) {
+            content
+                .onKeyPress(.upArrow) { onUp(); return .handled }
+                .onKeyPress(.downArrow) { onDown(); return .handled }
+                .onKeyPress(.leftArrow) { onLeft(); return .handled }
+                .onKeyPress(.rightArrow) { onRight(); return .handled }
+                .onKeyPress(.return) { onReturn(); return .handled }
+        } else {
+            content
+        }
+    }
 }
 
 struct ContentView: View {
@@ -370,6 +418,9 @@ struct ContentView: View {
     @State private var isOptionPressed: Bool = false
     @State private var isCommandPressed: Bool = false
     @State private var forceShowOptions: Bool = false
+    @State private var keyboardSelectedId: UUID?
+    @State private var isInSelectMode: Bool = false
+    @FocusState private var searchFieldFocused: Bool
     @State private var runningApps: [AppInfo] = []
     @State private var showRunningSheet: Bool = false
     @State private var historySortMode: HistorySortMode = .manual
@@ -386,6 +437,7 @@ struct ContentView: View {
     @State private var isTargetedForAppDrop = false
     @State private var flagsChangedMonitor: Any?
     @State private var keyEventMonitor: Any?
+    @State private var gridItemFrames: [UUID: CGRect] = [:]
     
     var body: some View {
         HStack {
@@ -440,7 +492,6 @@ struct ContentView: View {
                 
                 if historyViewMode == .list {
                     if displayedHistory.isEmpty && !historySearchText.isEmpty {
-                        // 历史记录无匹配，从已安装应用列表里搜
                         List {
                             if appSearchResults.isEmpty {
                                 Text("没有找到匹配的应用")
@@ -449,6 +500,13 @@ struct ContentView: View {
                             } else {
                                 ForEach(appSearchResults) { app in
                                     AppSearchResultRow(app: app, onLaunch: { launchAppFromHistory(app: app) })
+                                        .tag(app.id)
+                                        .listRowBackground(
+                                            keyboardSelectedId == app.id && isInSelectMode
+                                                ? Color.accentColor.opacity(0.35)
+                                                : Color.clear
+                                        )
+                                        .listRowSeparator(.hidden)
                                 }
                             }
                         }
@@ -466,6 +524,13 @@ struct ContentView: View {
                                     onMove: moveHistoryItem,
                                     isOptionPressed: isOptionPressed || forceShowOptions
                                 )
+                                .tag(app.id)
+                                .listRowBackground(
+                                    keyboardSelectedId == app.id && isInSelectMode
+                                        ? Color.accentColor.opacity(0.35)
+                                        : Color.clear
+                                )
+                                .listRowSeparator(.hidden)
                             }
                         }
                         .scrollContentBackground(.hidden)
@@ -485,7 +550,7 @@ struct ContentView: View {
                         }
                     }
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: CGFloat(gridIconSize) + 20))], spacing: 16) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: CGFloat(gridIconSize) + 20), spacing: 16)], spacing: 16) {
                             ForEach(displayedHistory) { app in
                                 HistoryGridItemView(
                                     app: app,
@@ -493,7 +558,16 @@ struct ContentView: View {
                                     onLaunch: { launchAppFromHistory(app: app) },
                                     onToggleFavorite: { toggleFavorite(app: app) },
                                     onDelete: { deleteAppFromHistory(app: app) },
-                                    onKill: { killApp(app: app) }
+                                    onKill: { killApp(app: app) },
+                                    isSelected: keyboardSelectedId == app.id && isInSelectMode
+                                )
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: GridItemFramesPreferenceKey.self,
+                                            value: [app.id: geo.frame(in: .named("historyGrid"))]
+                                        )
+                                    }
                                 )
                                 .onDrag {
                                     draggedHistoryApp = app
@@ -509,6 +583,10 @@ struct ContentView: View {
                             }
                         }
                         .padding(.vertical, 8)
+                        .coordinateSpace(name: "historyGrid")
+                        .onPreferenceChange(GridItemFramesPreferenceKey.self) { frames in
+                            gridItemFrames = frames
+                        }
                     }
                 }
 
@@ -643,8 +721,13 @@ struct ContentView: View {
     
     @ViewBuilder
     private var historySearchField: some View {
-        TextField("过滤历史记录", text: $historySearchText)
+        TextField("过滤历史记录（Enter 进入选择模式）", text: $historySearchText)
             .textFieldStyle(.roundedBorder)
+            .focused($searchFieldFocused)
+            .onChange(of: historySearchText) { _ in
+                keyboardSelectedId = nil
+                if isInSelectMode { exitSelectMode() }
+            }
         if !historySearchText.isEmpty {
             Button(action: { historySearchText = "" }) {
                 Image(systemName: "xmark.circle.fill")
@@ -654,6 +737,111 @@ struct ContentView: View {
         }
     }
     
+    private func enterSelectMode() {
+        let candidates = displayedHistory.isEmpty ? appSearchResults : displayedHistory
+        guard !candidates.isEmpty else { return }
+        isInSelectMode = true
+        searchFieldFocused = false
+        // 默认选第一项
+        if keyboardSelectedId == nil || !candidates.contains(where: { $0.id == keyboardSelectedId }) {
+            keyboardSelectedId = candidates.first?.id
+        }
+    }
+
+    private func exitSelectMode() {
+        isInSelectMode = false
+        searchFieldFocused = true
+    }
+
+    private func moveKeyboardSelection(dx: Int = 0, dy: Int = 0) {
+        let candidates = displayedHistory.isEmpty ? appSearchResults : displayedHistory
+        guard !candidates.isEmpty else { return }
+
+        // 列表模式：一维顺序
+        if historyViewMode == .list {
+            let currentIndex = keyboardSelectedId.flatMap { id in candidates.firstIndex(where: { $0.id == id }) } ?? 0
+            let newIndex = currentIndex + dx + dy
+            if newIndex >= 0 && newIndex < candidates.count {
+                keyboardSelectedId = candidates[newIndex].id
+            }
+            return
+        }
+
+        // 图标模式：根据实际布局 frame 找上下左右邻居（窗口宽度变化时列数自动对）
+        guard let currentId = keyboardSelectedId,
+              let currentFrame = gridItemFrames[currentId] else {
+            keyboardSelectedId = candidates.first?.id
+            return
+        }
+
+        let origin = CGPoint(x: currentFrame.midX, y: currentFrame.midY)
+        let rowTolerance = max(currentFrame.height * 0.55, 8)
+
+        struct Neighbor {
+            let id: UUID
+            let primary: CGFloat
+            let secondary: CGFloat
+        }
+
+        var best: Neighbor?
+
+        for app in candidates {
+            guard app.id != currentId, let frame = gridItemFrames[app.id] else { continue }
+            let deltaX = frame.midX - origin.x
+            let deltaY = frame.midY - origin.y
+
+            let neighbor: Neighbor?
+            switch (dx, dy) {
+            case (1, _):
+                guard deltaX > 1, abs(deltaY) <= rowTolerance else { continue }
+                neighbor = Neighbor(id: app.id, primary: deltaX, secondary: abs(deltaY))
+            case (-1, _):
+                guard deltaX < -1, abs(deltaY) <= rowTolerance else { continue }
+                neighbor = Neighbor(id: app.id, primary: -deltaX, secondary: abs(deltaY))
+            case (_, 1):
+                guard deltaY > 1 else { continue }
+                neighbor = Neighbor(id: app.id, primary: deltaY, secondary: abs(deltaX))
+            case (_, -1):
+                guard deltaY < -1 else { continue }
+                neighbor = Neighbor(id: app.id, primary: -deltaY, secondary: abs(deltaX))
+            default:
+                continue
+            }
+
+            guard let neighbor else { continue }
+
+            if let currentBest = best {
+                let better: Bool
+                if dy != 0 {
+                    // 上下：先对齐同一列，再取最近一行
+                    if abs(neighbor.secondary - currentBest.secondary) > 1 {
+                        better = neighbor.secondary < currentBest.secondary
+                    } else {
+                        better = neighbor.primary < currentBest.primary
+                    }
+                } else {
+                    better = neighbor.primary < currentBest.primary
+                }
+                if better { best = neighbor }
+            } else {
+                best = neighbor
+            }
+        }
+
+        if let best {
+            keyboardSelectedId = best.id
+        }
+    }
+
+    private func launchKeyboardSelected() {
+        guard let id = keyboardSelectedId else { return }
+        let candidates = displayedHistory.isEmpty ? appSearchResults : displayedHistory
+        if let app = candidates.first(where: { $0.id == id }) {
+            launchAppFromHistory(app: app)
+        }
+        isInSelectMode = false
+    }
+
     private var displayedHistory: [AppInfo] {
         let filterFavorites = showOnlyFavorites || isCommandPressed
         var base = filterFavorites ? historyModel.history.filter { $0.isFavorite } : historyModel.history
@@ -875,6 +1063,50 @@ struct ContentView: View {
         keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             self.isOptionPressed = event.modifierFlags.contains(.option)
             self.isCommandPressed = event.modifierFlags.contains(.command)
+
+            if event.type == .keyDown {
+                // Enter 键
+                if event.keyCode == 36 {
+                    if self.isInSelectMode {
+                        // 选中模式下 Enter = 启动
+                        self.launchKeyboardSelected()
+                        return nil
+                    } else {
+                        // 搜索模式下 Enter = 进入选中模式
+                        self.enterSelectMode()
+                        return nil
+                    }
+                }
+
+                // Esc 键：退出选中模式
+                if event.keyCode == 53 {
+                    if self.isInSelectMode {
+                        self.exitSelectMode()
+                        return nil
+                    }
+                }
+
+                // 选中模式下拦截方向键（列表一维；图标网格二维）
+                if self.isInSelectMode {
+                    switch event.keyCode {
+                    case 125: // 下
+                        self.moveKeyboardSelection(dy: 1)
+                        return nil
+                    case 126: // 上
+                        self.moveKeyboardSelection(dy: -1)
+                        return nil
+                    case 124: // 右
+                        self.moveKeyboardSelection(dx: 1)
+                        return nil
+                    case 123: // 左
+                        self.moveKeyboardSelection(dx: -1)
+                        return nil
+                    default:
+                        break
+                    }
+                }
+            }
+
             return event
         }
         
